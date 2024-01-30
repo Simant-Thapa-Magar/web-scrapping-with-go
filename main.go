@@ -6,12 +6,17 @@ import (
 	"github.com/gocolly/colly/v2"
 	"sync"
 	"strconv"
+	"context" 
+	"github.com/chromedp/cdproto/cdp" 
+	"github.com/chromedp/chromedp" 
+	"log" 
 )
 
 type Job struct {
 	Title			string
 	Employer		string
 	Link			string
+	Source			string
 }
 
 func main() {
@@ -27,36 +32,45 @@ func beginScrapping(keywords []string) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go ScrapMeroJob(keywords, ch, &wg)
-
+	wg.Add(1)
+	go ScrapJobNepalWithChromium(keywords, &wg, ch)
 	go func(){
 		wg.Wait()
 		close(ch)
 	}()
 
 	for jobs := range ch {
-		fmt.Printf("Job details: title %v employer %v link %v \n", jobs.Title, jobs.Employer, jobs.Link)
+		fmt.Printf("Job details from %v: title %v employer %v link %v \n", jobs.Source, jobs.Title, jobs.Employer, jobs.Link)
 	}
 
 	fmt.Println("end scrappin")
 }
 
-// func ScrapJobNepal(keywords []string,wg *sync.WaitGroup) {
-// 	defer (*wg).Done()
-// 	fmt.Println("scrap start")
-// 	url := fmt.Sprintf(`https://www.jobsnepal.com/search?q=%s`, strings.Join(keywords, "+"))
-// 	c := colly.NewCollector()
+func ScrapJobNepalWithChromium(keywords []string, wg *sync.WaitGroup, ch chan Job) {
+	defer (*wg).Done()
+	url := fmt.Sprintf(`https://www.jobsnepal.com/search?q=%s`, strings.Join(keywords, "+"))
+	ctx, cancel := chromedp.NewContext( 
+		context.Background(), 
+		chromedp.WithLogf(log.Printf), 
+	) 
+	defer cancel() 
+	var nodes []*cdp.Node 
+	chromedp.Run(ctx, 
+		chromedp.Navigate(url), 
+		chromedp.Nodes(".vb-content>div", &nodes, chromedp.ByQueryAll), 
+	) 
 
-// 	c.OnHTML("div.vb-content", func(e *colly.HTMLElement) {
-// 		fmt.Println("job title is ", e.Text)
-// 	})
+	for _, node := range nodes {
+		var newJob Job
+		chromedp.Run(ctx, 
+			chromedp.Text(".title", &newJob.Title, chromedp.ByQuery, chromedp.FromNode(node)),
+			 chromedp.Text("h6>a", &newJob.Employer, chromedp.ByQuery, chromedp.FromNode(node)), 
+			 chromedp.AttributeValue("h6>a", "href", &newJob.Link, nil, chromedp.ByQuery, chromedp.FromNode(node)),)
 
-// 	c.OnRequest(func(r *colly.Request) {
-// 		fmt.Println("Visiting", r.URL)
-// 	})
-
-// 	c.Visit(url)
-// 	c.Wait()
-// }
+		newJob.Source = "Jobs Nepal"
+		ch <- newJob
+	}
+}
 
 func ScrapMeroJob(keywords []string, ch chan Job, wg *sync.WaitGroup) {
 	domain := "https://merojob.com"
@@ -81,6 +95,7 @@ func ScrapMeroJob(keywords []string, ch chan Job, wg *sync.WaitGroup) {
 				Title: strings.TrimSpace(jobTitle),
 				Employer: strings.TrimSpace(employerName),
 				Link: jobLink,
+				Source: "Mero Job",
 			}
 
 			ch <- job
