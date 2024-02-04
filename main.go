@@ -11,6 +11,7 @@ import (
 	"github.com/chromedp/chromedp" 
 	"log" 
 	"time"
+	"os"
 )
 
 type Job struct {
@@ -22,7 +23,11 @@ type Job struct {
 
 func main() {
 	fmt.Println("main start")
-	keywords := []string{"web"}
+	keywords := os.Args[1:]
+	fmt.Println("keywords ", keywords)
+	if len(keywords) == 0 {
+		panic("no keywords")
+	}
 	beginScrapping(keywords)
 	fmt.Println("main end")
 }
