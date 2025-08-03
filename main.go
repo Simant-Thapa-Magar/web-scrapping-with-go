@@ -1,24 +1,25 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"strings"
-	"github.com/gocolly/colly/v2"
-	"sync"
-	"strconv"
-	"context" 
-	"github.com/chromedp/cdproto/cdp" 
-	"github.com/chromedp/chromedp" 
-	"log" 
-	"time"
+	"log"
 	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/chromedp"
+	"github.com/gocolly/colly/v2"
 )
 
 type Job struct {
-	Title			string
-	Employer		string
-	Link			string
-	Source			string
+	Title    string
+	Employer string
+	Link     string
+	Source   string
 }
 
 func main() {
@@ -42,7 +43,7 @@ func beginScrapping(keywords []string) {
 	go ScrapJobNepalWithChromium(keywords, &wg, ch)
 	wg.Add(1)
 	go ScrapJobejeeWithChromium(keywords, &wg, ch)
-	go func(){
+	go func() {
 		wg.Wait()
 		close(ch)
 	}()
@@ -57,27 +58,27 @@ func beginScrapping(keywords []string) {
 func ScrapJobNepalWithChromium(keywords []string, wg *sync.WaitGroup, ch chan Job) {
 	defer (*wg).Done()
 	url := fmt.Sprintf(`https://www.jobsnepal.com/search?q=%s`, strings.Join(keywords, "+"))
-	ctx, cancel := chromedp.NewContext( 
-		context.Background(), 
-		chromedp.WithLogf(log.Printf), 
-	) 
-	defer cancel() 
+	ctx, cancel := chromedp.NewContext(
+		context.Background(),
+		chromedp.WithLogf(log.Printf),
+	)
+	defer cancel()
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	var nodes []*cdp.Node 
-	chromedp.Run(timeoutCtx, 
-		chromedp.Navigate(url), 
-		chromedp.Nodes(".vb-content>div", &nodes, chromedp.ByQueryAll), 
-	) 
+	var nodes []*cdp.Node
+	chromedp.Run(timeoutCtx,
+		chromedp.Navigate(url),
+		chromedp.Nodes(".vb-content>div", &nodes, chromedp.ByQueryAll),
+	)
 
 	for _, node := range nodes {
 		var newJob Job
-		chromedp.Run(ctx, 
+		chromedp.Run(ctx,
 			chromedp.Text(".title", &newJob.Title, chromedp.ByQuery, chromedp.FromNode(node)),
-			 chromedp.Text("h6>a", &newJob.Employer, chromedp.ByQuery, chromedp.FromNode(node)), 
-			 chromedp.AttributeValue("h6>a", "href", &newJob.Link, nil, chromedp.ByQuery, chromedp.FromNode(node)),)
+			chromedp.Text("h6>a", &newJob.Employer, chromedp.ByQuery, chromedp.FromNode(node)),
+			chromedp.AttributeValue("h6>a", "href", &newJob.Link, nil, chromedp.ByQuery, chromedp.FromNode(node)))
 
 		newJob.Source = "Jobs Nepal"
 		ch <- newJob
@@ -92,30 +93,30 @@ func ScrapMeroJob(keywords []string, ch chan Job, wg *sync.WaitGroup) {
 	c := colly.NewCollector()
 
 	c.OnHTML("#search_job", func(e *colly.HTMLElement) {
-		e.ForEach("div.card", func(_ int, el *colly.HTMLElement){
+		e.ForEach("div.card", func(_ int, el *colly.HTMLElement) {
 			id := el.Attr("id")
 			// some card have id that aren't job
 			if id == "" {
-			goquerySelection := el.DOM
-			jobTitleElement := goquerySelection.Find("h1")
-			jobLinkElement := jobTitleElement.Find("a")
-			jobTitle := jobLinkElement.Text()
-			employerName := goquerySelection.Find("h3 > a").Text()
-			jobLink, _ := jobLinkElement.Attr("href")
+				goquerySelection := el.DOM
+				jobTitleElement := goquerySelection.Find("h1")
+				jobLinkElement := jobTitleElement.Find("a")
+				jobTitle := jobLinkElement.Text()
+				employerName := goquerySelection.Find("h3 > a").Text()
+				jobLink, _ := jobLinkElement.Attr("href")
 
-			job := Job{
-				Title: strings.TrimSpace(jobTitle),
-				Employer: strings.TrimSpace(employerName),
-				Link: domain + jobLink,
-				Source: "Mero Job",
+				job := Job{
+					Title:    strings.TrimSpace(jobTitle),
+					Employer: strings.TrimSpace(employerName),
+					Link:     domain + jobLink,
+					Source:   "Mero Job",
+				}
+
+				ch <- job
 			}
-
-			ch <- job
-		}
 		})
 	})
 
-	c.OnHTML("a.page-link", func (e *colly.HTMLElement) {
+	c.OnHTML("a.page-link", func(e *colly.HTMLElement) {
 		linkText := e.Text
 		linkN, err := strconv.Atoi(linkText)
 		if err == nil && linkN > 1 {
@@ -142,39 +143,57 @@ func ScrapAllJobejeePages(keywords []string, ch chan Job) {
 	prevUrl := ""
 	url := fmt.Sprintf(`https://www.jobejee.com/job-search?q=%s`, strings.Join(keywords, "_"))
 
-	ctx, cancel := chromedp.NewContext( 
-		context.Background(), 
-		chromedp.WithLogf(log.Printf), 
-	) 
-	defer cancel() 
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-gpu", true),
+		chromedp.Flag("disable-background-networking", true),
+		chromedp.Flag("disable-default-apps", true),
+		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("disable-sync", true),
+		chromedp.Flag("disable-translate", true),
+		chromedp.Flag("metrics-recording-only", true),
+		chromedp.Flag("mute-audio", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("safebrowsing-disable-auto-update", true),
+	)
+
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer cancel()
+
+	ctx, cancel := chromedp.NewContext(
+		allocCtx,
+		chromedp.WithLogf(log.Printf),
+	)
+	defer cancel()
 
 	timeoutContext, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel() 
+	defer cancel()
 
 	for prevUrl != url {
 		prevUrl = url
-		
-		var nodes []*cdp.Node 
 
-		chromedp.Run(ctx, 
-			chromedp.Navigate(url), 
-			chromedp.Nodes("div.lg-box", &nodes, chromedp.ByQueryAll), 
-		) 
+		var nodes []*cdp.Node
+
+		chromedp.Run(ctx,
+			chromedp.Navigate(url),
+			chromedp.Nodes("div.lg-box", &nodes, chromedp.ByQueryAll),
+		)
 
 		for _, node := range nodes {
 			var newJob Job
-			chromedp.Run(ctx, 
+			chromedp.Run(ctx,
 				chromedp.Text("p.inner-header", &newJob.Title, chromedp.ByQuery, chromedp.FromNode(node)),
-				chromedp.Text("div.client-name a", &newJob.Employer, chromedp.ByQuery, chromedp.FromNode(node)), 
-				chromedp.AttributeValue("p.inner-header a", "href", &newJob.Link, nil, chromedp.ByQuery, chromedp.FromNode(node)),)
-				newJob.Link = "https://www.jobejee.com" + newJob.Link
+				chromedp.Text("div.client-name", &newJob.Employer, chromedp.ByQuery, chromedp.FromNode(node)),
+				chromedp.AttributeValue("p.inner-header a", "href", &newJob.Link, nil, chromedp.ByQuery, chromedp.FromNode(node)),
+			)
+			newJob.Link = "https://www.jobejee.com" + newJob.Link
 			newJob.Source = "Jobjee"
 			ch <- newJob
 		}
 
 		var paginationNodes []*cdp.Node
 
-		paginationErr := chromedp.Run(timeoutContext,chromedp.Nodes("ul.pagination>li", &paginationNodes, chromedp.ByQueryAll))
+		paginationErr := chromedp.Run(timeoutContext, chromedp.Nodes("ul.pagination>li", &paginationNodes, chromedp.ByQueryAll))
 		if paginationErr == nil {
 			newVisit := false
 			for _, paginationNode := range paginationNodes {
